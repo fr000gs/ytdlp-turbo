@@ -3,11 +3,12 @@ use std::process::Command;
 //use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn main() {
     loop {
         // Ask if the user wants to use the same format for playlist
+        run_command(vec!["color", "f0"]);
         println!("Same format for playlist? (Y/n): ");
         io::stdout().flush().unwrap();
         let use_playlist_format = get_input_with_timeout(3).unwrap_or("y".to_string()).to_lowercase();
@@ -24,6 +25,7 @@ fn main() {
     }
 }
 
+/*
 fn download_playlist(url: &str) {
     println!("Fetching playlist format options...");
     run_command(vec!["yt-dlp", "--color", "never", "-I", "1", "-F", url]);
@@ -62,7 +64,8 @@ fn download_playlist(url: &str) {
         let thread_url = url.to_string();
 
         let handle = thread::spawn(move || {
-            let range_command = segment_start+1.to_string()+":"+&segment_end+1.to_string();
+            //let range_command = &segment_start+1.to_string()+":"+&segment_end+1.to_string();
+            let range_command = format!("{}:{}", segment_start, segment_end);
             println!("Downloading range: {} to {}", segment_start, segment_end);
             run_command(vec![
                 "yt-dlp", "--color", "never", "--write-auto-subs", "--embed-subs",
@@ -89,7 +92,84 @@ fn download_playlist(url: &str) {
     //while rx.recv() {
     //    println!("Download completed for a segment.");
     //}
+}*/
+
+fn download_playlist(url: &str) {
+    println!("Fetching playlist format options...");
+    run_command(vec!["yt-dlp", "--color", "never", "-I", "1", "-F", url]);
+
+    let format_code = select_format();
+    println!("Selected format: {}. Starting playlist download...", format_code);
+
+    // Get the total video count in the playlist
+    let total_videos = get_playlist_count(url);
+    println!("Total videos in playlist: {}", total_videos);
+
+    // Get download range from user
+    let (start_index, end_index) = get_download_range(total_videos);
+
+    // Create a channel for thread communication
+    let (tx, rx) = mpsc::channel();
+
+    // Ask the user for the number of concurrent downloads
+    let num_threads: usize = read_input("Enter number of concurrent downloads: ")
+        .parse()
+        .unwrap_or(1); // Default to 1 if parsing fails
+
+    let segment_length = (end_index - start_index + 1) / num_threads;
+    let mut handles = vec![];
+
+    let start_time = Instant::now(); // Start timing
+
+    for i in 0..num_threads {
+        let tx = tx.clone();
+        let segment_start = start_index + i * segment_length;
+        let segment_end = if i == num_threads - 1 {
+            end_index // Last thread takes the remainder
+        } else {
+            segment_start + segment_length - 1
+        };
+
+        let format_code = format_code.clone();
+        let thread_url = url.to_string();
+
+        let handle = thread::spawn(move || {
+            let range_command = format!("{}:{}", segment_start, segment_end);
+            println!("Downloading range: {} to {}", segment_start, segment_end);
+            
+            // Start timing for this thread
+            let thread_start_time = Instant::now();
+            run_command(vec![
+                "yt-dlp", "--color", "never", "--write-auto-subs", "--embed-subs",
+                "-f", &format_code, "--restrict-filenames", "-c", "--skip-unavailable-fragments",
+                "--ignore-errors", "-I", &range_command, "-o", "%(playlist_index)sof%(n_entries)s-%(title)s.%(ext)s",
+                &thread_url,
+            ]);
+            let thread_duration = thread_start_time.elapsed(); // Calculate thread duration
+            tx.send(thread_duration).unwrap(); // Send thread duration back to main thread
+        });
+
+        handles.push(handle);
+    }
+
+    // Drop the sender to close the channel when done
+    drop(tx);
+
+    // Wait for all downloads to complete and collect elapsed times
+    let mut total_durations = vec![];
+    for _ in handles {
+        let duration = rx.recv().expect("Failed to receive duration");
+        total_durations.push(duration);
+    }
+
+    for (i, duration) in total_durations.iter().enumerate() {
+        println!("Segment {} download completed in {:?}", i + 1, duration);
+    }
+
+    let total_time = start_time.elapsed(); // Calculate total elapsed time
+    println!("Total playlist download complete in {:?}", total_time);
 }
+//***************
 
 fn get_playlist_count(url: &str) -> usize {
     // Run yt-dlp to get the playlist count
@@ -122,6 +202,7 @@ fn get_download_range(total_videos: usize) -> (usize, usize) {
     (start_index, end_index)
 }
 
+/*
 fn download_video(url: &str) {
     println!("Fetching video format options...");
     run_command(vec!["yt-dlp", "--color", "never", "-F", url]);
@@ -134,6 +215,25 @@ fn download_video(url: &str) {
         "--restrict-filenames", "-c", "--skip-unavailable-fragments", "--ignore-errors",
         "-o", "%(title)s.%(ext)s", url,
     ]);
+}*/
+
+fn download_video(url: &str) {
+    println!("Fetching video format options...");
+    run_command(vec!["yt-dlp", "--color", "never", "-F", url]);
+
+    let format_code = select_format();
+    println!("Selected format: {}. Starting video download...", format_code);
+
+    let start_time = Instant::now(); // Start timing
+
+    run_command(vec![
+        "yt-dlp", "--color", "never", "--write-auto-subs", "--embed-subs", "-f", &format_code,
+        "--restrict-filenames", "-c", "--skip-unavailable-fragments", "--ignore-errors",
+        "-o", "%(title)s.%(ext)s", url,
+    ]);
+
+    let duration = start_time.elapsed(); // Calculate elapsed time
+    println!("Video download complete in {:?}", duration);
 }
 
 fn select_format() -> String {
@@ -255,3 +355,5 @@ fn download_playlist(url: &str) {
         println!("Completed download for video at index: {}", completed_index);
     }
 }*/
+
+
