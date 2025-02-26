@@ -1,0 +1,14 @@
+[package]
+name = "ytdlp-turbo"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+
+
+[profile.release]
+# Optimization settings for the release build
+lto = "fat"              # Enable Link Time Optimization (LTO) for smaller binaries and faster performance
+codegen-units = 1         # Use a single code generation unit for better optimization
+panic = "abort"           # Reduce binary size by avoiding unwind info
+incremental = false       # Disable incremental compilation for clean release builds
